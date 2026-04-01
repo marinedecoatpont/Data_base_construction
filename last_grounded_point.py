@@ -7,15 +7,14 @@ import sqlite3
 # IGE / PhD
 #
 # This script extracts, for each (simulation, experiment, x, y),
-# the last available time step from flux_data_2 and stores it in
+# the last available time step from flux_data and stores it in
 # a new table: last_grounded_point
 # -------------------------------------------------------------------------------------------------------------------------------
 
-print('START OF COMPARISON PROGRAM', flush=True)
+print('START OF PROGRAM', flush=True)
 
 test = False
 resolutions = [16]
-
 
 for reso in resolutions:
     if test:
@@ -27,12 +26,44 @@ for reso in resolutions:
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
 
-    #cursor.execute("DROP TABLE IF EXISTS last_grounded_point")
-    
-    
+    #CALCUL DU TEMPS DE RÉSIDENCE DANS FLUX_DATA 
+    print("Computing residence time...", flush=True)
+
+    try:
+        cursor.execute("""ALTER TABLE flux_data ADD COLUMN residence INTEGER""")
+    except sqlite3.OperationalError:
+        print("Column 'residence' already exists", flush=True)
+
+    cursor.execute("""
+            CREATE TEMP TABLE residence_stats AS
+            SELECT
+                x,
+                y,
+                simulation,
+                experiment,
+                COUNT(time) AS residence
+            FROM flux_data
+            GROUP BY x, y, simulation, experiment
+    """)
+
+    cursor.execute("""
+            UPDATE flux_data
+            SET residence = (
+                SELECT r.residence
+                FROM residence_stats r
+                WHERE r.x = flux_data.x
+                AND r.y = flux_data.y
+                AND r.simulation = flux_data.simulation
+                AND r.experiment = flux_data.experiment
+            )
+    """)
+
+    conn.commit()
+
+    #CREATION DE LA TABLE LAST_GROUNDED_POINT
     try:
         cursor.execute("""
-        CREATE TABLE  last_grounded_point_ (
+        CREATE TABLE last_grounded_point (
             x REAL,
             y REAL,
             simulation TEXT,
@@ -52,21 +83,23 @@ for reso in resolutions:
     except sqlite3.OperationalError:
         pass
 
-    queveryr = f"""ALTER TABLE last_grounded_point_ ADD COLUMN R_drag REAL"""
-    queveryr_m = f"""ALTER TABLE last_grounded_point_ ADD COLUMN driving_stress REAL"""
-    queveryslope_m = f"""ALTER TABLE last_grounded_point_ ADD COLUMN slope_max REAL"""
-    queveryslope_f = f"""ALTER TABLE last_grounded_point_ ADD COLUMN slope_flux REAL"""
-    try:
-        cursor.execute(queveryr)
-        cursor.execute(queveryr_m)
-        cursor.execute(queveryslope_m)
-        cursor.execute(queveryslope_f)
-    except sqlite3.OperationalError:
-        pass
+    # Ajout colonnes
+    for q in [
+        "ALTER TABLE last_grounded_point ADD COLUMN R_drag REAL",
+        "ALTER TABLE last_grounded_point ADD COLUMN driving_stress REAL",
+        "ALTER TABLE last_grounded_point ADD COLUMN slope_max REAL",
+        "ALTER TABLE last_grounded_point ADD COLUMN slope_flux REAL",
+        "ALTER TABLE last_grounded_point ADD COLUMN residence INTEGER"
+    ]:
+        try:
+            cursor.execute(q)
+        except sqlite3.OperationalError:
+            pass
 
     conn.commit()
+
     insert_query = """
-    INSERT INTO last_grounded_point_
+    INSERT INTO last_grounded_point
     SELECT
         f.x,
         f.y,
@@ -85,7 +118,8 @@ for reso in resolutions:
         f.R_drag,
         f.driving_stress,
         f.slope_max,
-        f.slope_flux
+        f.slope_flux,
+        f.residence
     FROM flux_data f
     JOIN (
         SELECT
@@ -121,7 +155,6 @@ for reso in resolutions:
     FROM last_grounded_point_
     GROUP BY x, y;
     """)
-    conn.commit()
 
     cursor.execute("""
     UPDATE last_grounded_point_
@@ -137,9 +170,8 @@ for reso in resolutions:
             WHERE s.x = last_grounded_point_.x AND s.y = last_grounded_point_.y
         );
     """)
-    conn.commit()
-    conn.close()
 
+    conn.commit()
     conn.close()
 
 print('Everything seems okay ~(°w°~)', flush=True)
