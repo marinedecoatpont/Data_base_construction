@@ -71,9 +71,13 @@ Rows are filtered to the spatial extent of Zwally basin `{id}` (1–26).
 
 ### Table: `bedmachine_gl`
 
-Same schema as `last_grounded_point`.
+Same schema as `last_grounded_point`, plus:
 
-Rows are filtered to (x, y) pixels that coincide with the BedMachine observed grounding line.
+| Column | Long name | Unit |
+|---|---|---|
+| `flux_bed` | BedMachine observed grounding-line flux (from `ligroundf_bedmachine_all_test.nc`) | Same unit as `ligroundf` field |
+
+Rows are filtered to (x, y) pixels that have a non-zero value in the BedMachine `ligroundf` field after interpolation onto the simulation grid.
 
 ---
 

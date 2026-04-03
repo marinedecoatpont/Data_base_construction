@@ -2,16 +2,15 @@
 04_build_bedmachine_database.py
 ================================
 Creates a SQLite database containing only the rows from last_grounded_point
-whose (x, y) coordinates match pixels on the BedMachine grounding line.
+whose (x, y) coordinates match non-zero pixels in the BedMachine grounding-line
+flux file (ligroundf_bedmachine_all_test.nc).
 
-The grounding line is identified from the BedMachine mask field:
-  mask == 1 → grounded ice
-  mask == 0 → ocean / ice shelf
-Grounding-line pixels are those where at least one immediate neighbour has
-a different mask value (i.e. the transition zone).
+The BedMachine flux field is used directly as the reference: pixels where
+ligroundf != 0 define the observed grounding line. The script then filters
+last_grounded_point to those coordinates and stores the result in a new database
+whose schema is identical to the per-basin databases.
 
-The output database has the same schema as the per-basin databases and can be
-used directly by basin_analysis.py for observational reference.
+A flux_bed column (BedMachine flux value) is added to each matched row.
 """
 
 import os
@@ -25,39 +24,41 @@ import config
 
 
 # =============================================================================
-# BEDMACHINE GROUNDING LINE DETECTION
+# HELPERS
 # =============================================================================
 
-def _get_bedmachine_gl_coords(bm_path: str,
-                               target_x: np.ndarray,
-                               target_y: np.ndarray) -> set:
+def _grid(da: xr.DataArray, reso: int) -> xr.DataArray:
+    """Interpolates da onto the reference simulation grid for a given resolution."""
+    ref = xr.open_dataset(config.GRID_FILES[reso])
+    da_interp = da.interp(x=ref.x, y=ref.y)
+    ref.close()
+    return da_interp
+
+
+def _load_bedmachine_flux(bm_flux_path: str, reso: int) -> xr.DataArray:
     """
-    Identifies grounding-line pixels in BedMachine, interpolates the mask
-    onto the simulation grid, and returns a set of (x, y) tuples.
-
-    Parameters
-    ----------
-    bm_path   : path to BedMachineAntarctica.nc
-    target_x  : 1-D x coordinates of the simulation grid
-    target_y  : 1-D y coordinates of the simulation grid
+    Opens the BedMachine grounding-line flux file and interpolates it
+    onto the simulation grid.
+    Returns a DataArray with NaN everywhere the flux is zero.
     """
-    ds   = xr.open_dataset(bm_path)
-    mask = ds["mask"]  # 0 = ocean/shelf, 1 = grounded, 2 = floating, 3 = rock
-
-    # Interpolate onto the simulation grid (nearest neighbour)
-    mask_interp = mask.interp(x=target_x, y=target_y, method="nearest")
-    m = mask_interp.values.astype(int)
-
-    # Grounding-line pixels: grounded cells adjacent to floating/ocean
-    gl_mask = np.zeros_like(m, dtype=bool)
-    grounded = (m == 1)
-    for di, dj in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
-        shifted = np.roll(grounded, (di, dj), axis=(0, 1))
-        gl_mask |= (grounded & ~shifted)
-
+    ds          = xr.open_dataset(bm_flux_path)
+    flux_bed    = ds.ligroundf
+    flux_bed    = xr.where(flux_bed != 0, flux_bed, np.nan)
+    flux_interp = _grid(flux_bed, reso)
     ds.close()
-    rows, cols = np.where(gl_mask)
-    return set(zip(target_x[cols].tolist(), target_y[rows].tolist()))
+    return flux_interp
+
+
+def _extract_gl_points(flux_bed: xr.DataArray) -> tuple:
+    """
+    Returns arrays (x, y, flux) for all non-zero BedMachine GL pixels.
+    """
+    mask   = np.isfinite(flux_bed.values) & (flux_bed.values != 0)
+    ii, jj = np.where(mask)
+    xf     = flux_bed.x.values[jj]
+    yf     = flux_bed.y.values[ii]
+    flux_f = flux_bed.values[ii, jj]
+    return xf, yf, flux_f
 
 
 # =============================================================================
@@ -88,7 +89,8 @@ CREATE TABLE IF NOT EXISTS bedmachine_gl (
     buttressing_natural  REAL,
     residence            INTEGER,
     n_simulations        INTEGER,
-    n_timesteps          INTEGER
+    n_timesteps          INTEGER,
+    flux_bed             REAL
 );
 """
 
@@ -97,31 +99,34 @@ CREATE TABLE IF NOT EXISTS bedmachine_gl (
 # MAIN
 # =============================================================================
 
-def build_bedmachine_database(reso: int) -> None:
-    db_src  = config.get_db_path(reso)
-    db_out  = os.path.join(config.SAVE_PATH, f"BedMachine_GL_{reso}km.db")
-    grid_nc = config.GRID_FILES[reso]
+def build_bedmachine_database(reso: int,
+                               bm_flux_path: str,
+                               db_src: str,
+                               db_out: str) -> None:
+    """
+    Filters last_grounded_point to BedMachine GL pixels and writes the
+    result (with an added flux_bed column) to db_out.
+    """
+    print(f"Loading BedMachine flux from {bm_flux_path} …", flush=True)
+    flux_bed       = _load_bedmachine_flux(bm_flux_path, reso)
+    xf, yf, flux_f = _extract_gl_points(flux_bed)
+    print(f"  {len(xf)} non-zero BedMachine GL pixels found.", flush=True)
 
-    # Reference grid coordinates
-    ds_ref   = xr.open_dataset(grid_nc)
-    target_x = ds_ref["x"].values
-    target_y = ds_ref["y"].values
-    ds_ref.close()
-
-    print("Detecting BedMachine grounding-line pixels …", flush=True)
-    gl_coords = _get_bedmachine_gl_coords(
-        config.BEDMACHINE_FILE, target_x, target_y
-    )
-    print(f"  {len(gl_coords)} GL pixels found.", flush=True)
+    # Build a lookup: (x, y) -> flux_bed value
+    bed_lookup = {(float(x), float(y)): float(f) for x, y, f in zip(xf, yf, flux_f)}
 
     print("Loading last_grounded_point …", flush=True)
     conn_src = sqlite3.connect(db_src)
     df       = pd.read_sql("SELECT * FROM last_grounded_point", conn_src)
     conn_src.close()
 
-    mask    = df.apply(lambda row: (row["x"], row["y"]) in gl_coords, axis=1)
-    df_gl   = df[mask].copy()
-    print(f"  {len(df_gl)} rows match BedMachine GL.", flush=True)
+    # Keep only rows whose (x, y) appear in the BedMachine GL pixel set
+    mask   = df.apply(lambda row: (row["x"], row["y"]) in bed_lookup, axis=1)
+    df_gl  = df[mask].copy()
+    df_gl["flux_bed"] = df_gl.apply(
+        lambda row: bed_lookup[(row["x"], row["y"])], axis=1
+    )
+    print(f"  {len(df_gl)} simulation rows match BedMachine GL coordinates.", flush=True)
 
     conn_dst = sqlite3.connect(db_out)
     cursor   = conn_dst.cursor()
@@ -129,12 +134,23 @@ def build_bedmachine_database(reso: int) -> None:
     df_gl.to_sql("bedmachine_gl", conn_dst, if_exists="replace", index=False)
     conn_dst.close()
 
-    print(f"  Output: {db_out}", flush=True)
+    print(f"  Output database: {db_out}", flush=True)
 
+
+# =============================================================================
+# ENTRY POINT
+# =============================================================================
 
 if __name__ == "__main__":
+    bm_flux_path = os.path.join(
+        config.SAVE_PATH, "ligroundf_bedmachine_all_test.nc"
+    )
+
     for reso in config.RESOLUTIONS:
+        db_src = config.get_db_path(reso)
+        db_out = os.path.join(config.SAVE_PATH, f"BedMachine_GL_{reso}km.db")
+
         print(f"\n=== Resolution {reso} km ===", flush=True)
-        build_bedmachine_database(reso)
+        build_bedmachine_database(reso, bm_flux_path, db_src, db_out)
 
     print("Done.", flush=True)

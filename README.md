@@ -136,13 +136,14 @@ Requires that `02_build_derived_tables.py` has been run first.
 ### `04_build_bedmachine_database.py`
 
 #### General description
-Creates a database containing only the rows from `last_grounded_point` whose (x, y) coordinates coincide with the BedMachine grounding line. This provides an observational reference at the exact observed GL position.
+Creates a database containing only the rows from `last_grounded_point` whose (x, y) coordinates match non-zero pixels in the BedMachine grounding-line flux file (`ligroundf_bedmachine_all_test.nc`). The BedMachine flux value is attached to each matched row as `flux_bed`, providing a direct observational reference at each simulated GL pixel.
 
 #### Step-by-step
-1. Opens BedMachineAntarctica.nc and interpolates the ice mask onto the simulation grid.
-2. Detects grounding-line pixels as grounded cells (mask = 1) adjacent to non-grounded cells.
-3. Reads `last_grounded_point` and keeps only the rows matching those coordinates.
-4. Writes the filtered data to a new SQLite database with a `bedmachine_gl` table.
+1. Opens `ligroundf_bedmachine_all_test.nc` and interpolates the flux field onto the simulation grid.
+2. Masks zero values to NaN, then extracts (x, y, flux) for all non-zero pixels — these define the observed grounding line.
+3. Builds a lookup dictionary `(x, y) → flux_bed`.
+4. Reads `last_grounded_point` from the main database and keeps only rows whose coordinates appear in the lookup.
+5. Adds a `flux_bed` column to the filtered rows and writes everything to a new SQLite database.
 
 #### How to run
 ```bash
@@ -152,11 +153,11 @@ Requires that `02_build_derived_tables.py` has been run first.
 
 #### Inputs
 - `{SAVE_PATH}/DataBase_{reso}km.db`  (must contain `last_grounded_point`)
-- `BedMachineAntarctica.nc`
+- `{SAVE_PATH}/ligroundf_bedmachine_all_test.nc`
 - `grid{reso}x{reso}.nc`
 
 #### Outputs
-- `{SAVE_PATH}/BedMachine_GL_{reso}km.db`  — SQLite database with `bedmachine_gl` table.
+- `{SAVE_PATH}/BedMachine_GL_{reso}km.db`  — SQLite database with `bedmachine_gl` table (same schema as `last_grounded_point` plus `flux_bed`).
 
 ---
 
