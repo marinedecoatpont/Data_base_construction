@@ -99,11 +99,9 @@ def build_basin_databases(reso: int) -> None:
             print(f"  Basin {basin_idx:02d}: no data, skipping.", flush=True)
             continue
 
-        basin_db = os.path.join(
-            config.BASIN_DB_DIR, f"basin_{basin_idx:02d}_{reso}km.db"
-        )
+        basin_db = os.path.join(config.BASIN_DB_DIR, f"basin_{basin_idx:02d}_{reso}km.db")
         conn_dst = sqlite3.connect(basin_db)
-        cursor   = conn_dst.cursor()
+        cursor = conn_dst.cursor()
         cursor.execute(CREATE_BASIN_TABLE)
         df_basin.to_sql("basin_data", conn_dst, if_exists="replace", index=False)
         conn_dst.close()
