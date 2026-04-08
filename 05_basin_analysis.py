@@ -251,87 +251,9 @@ def compute_theoretical_fluxes(cfg: dict) -> None:
     print(f"Step 2 done in {time.perf_counter() - t0:.1f}s\n")
 
 
-# STEP 3 — VISUALISATION
-def _plot_one_basin(ax, df: pd.DataFrame, basin_id: int, cfg: dict) -> None:
-    idx = np.arange(len(df))
-
-    if "flux_bed" in df.columns:
-        flux_bed = np.abs(df["flux_bed"].values) * cfg["rho_ice"] / 1e12
-        ax.scatter(idx, flux_bed, s=5, c="rebeccapurple", label="BedMachine", zorder=5)
-    else:
-        flux_bed = None
-
-    for simu, color in config.MODEL_COLORS.items():
-        col_flux = f"flux_{simu}"
-        col_time = f"time_{simu}"
-        if col_flux not in df.columns:
-            continue
-        flux_s = df[col_flux].values
-        time_s = np.nanmean(df[col_time].values) + cfg["ref_year"] if col_time in df.columns else np.nan
-        diff   = np.nanmean(np.abs(flux_bed - flux_s)) if flux_bed is not None else np.nan
-        ax.scatter(idx, flux_s, s=2, c=color, alpha=0.5,
-                   label=f"{simu} (Δ={diff:.3f}, {time_s:.0f})")
-
-    for col, (lbl, c) in {
-        "w1_theta"      : ("W m=1 +butt", "steelblue"),
-        "w3_theta"      : ("W m=3 +butt", "firebrick"),
-        "coulomb_theta" : ("Tsai +butt",  "goldenrod"),
-    }.items():
-        if col in df.columns:
-            ax.scatter(idx, df[col].values, s=1, c=c, alpha=0.3, marker="^", label=lbl)
-
-    ax.set_title(f"Basin {basin_id}", fontsize=9)
-    ax.set_xlabel("Index (x, y)", fontsize=7)
-    ax.set_ylabel("Flux (Gt yr-1)", fontsize=7)
-    ax.set_yscale("log")
-    ax.grid(True, which="both", alpha=0.3)
-    ax.legend(fontsize=5, markerscale=2)
-
-
-def plot_all_basins(cfg: dict) -> None:
-    t0 = time.perf_counter()
-    csv_files = sorted(
-        glob.glob(os.path.join(cfg["out_dir"], "basin_*.csv")),
-        key=lambda f: int(f.split("_")[-1].split(".")[0])
-    )
-    if not csv_files:
-        raise FileNotFoundError(f"No basin CSVs found in {cfg['out_dir']}. Run step 1 first.")
-
-    ncols = 5
-    nrows = math.ceil(len(csv_files) / ncols)
-    fig, axes = plt.subplots(nrows, ncols, figsize=(ncols * 8, nrows * 4))
-    axes = axes.flatten()
-
-    for k, csv_path in enumerate(csv_files):
-        basin_id = int(csv_path.split("_")[-1].split(".")[0])
-        _plot_one_basin(axes[k], pd.read_csv(csv_path), basin_id, cfg)
-
-    for i in range(len(csv_files), len(axes)):
-        fig.delaxes(axes[i])
-
-    fig.suptitle("Grounding-line flux per basin — BedMachine vs Models vs Theory",
-                 fontsize=16, fontweight="bold")
-    plt.tight_layout(rect=[0, 0, 1, 0.97])
-    plt.savefig(cfg["fig_out"], dpi=cfg["fig_dpi"])
-    plt.close()
-    print(f"Figure saved: {cfg['fig_out']}")
-    print(f"Step 3 done in {time.perf_counter() - t0:.1f}s\n")
-
-
-# STATISTICS UTILITY
-def compute_stats(x: np.ndarray, y: np.ndarray) -> tuple:
-    """Returns (r_pearson, residual_std, slope) ignoring NaN values."""
-    mask = ~np.isnan(x) & ~np.isnan(y)
-    xv, yv = x[mask], y[mask]
-    if len(xv) < 2:
-        return np.nan, np.nan, np.nan
-    r, _ = pearsonr(xv, yv)
-    slope, intcpt, *_ = linregress(xv, yv)
-    return r, float(np.std(yv - (slope * xv + intcpt))), float(slope)
-
 def main():
     parser = argparse.ArgumentParser(description="Basin-level grounding-line flux analysis pipeline.")
-    parser.add_argument("--step",type=int, choices=[1, 2, 3], default=0,help="Step to run (1=extract, 2=theory, 3=plot). Default: all.")
+    parser.add_argument("--step",type=int, choices=[1, 2], default=0,help="Step to run (1=extract, 2=theory). Default: all.")
     parser.add_argument("--db", default=PIPELINE_CFG["db_path"],  help="SQLite database")
     parser.add_argument("--nc", default=PIPELINE_CFG["nc_basins"], help="Basin NetCDF")
     parser.add_argument("--outdir", default=PIPELINE_CFG["out_dir"],   help="CSV output dir")
@@ -351,16 +273,17 @@ def main():
         extract_basins_to_csv(cfg)
 
     if step in (0, 2):
+        reso = 16
+        db_path = config.get_db_path(reso)
+        conn = sqlite3.connect(db_path)
+
+        quevery = f"SELECT simulation,experiment, time, x, y, thickness, velocity, viscosity, drag, flux, velocity_base, buttressing, buttressing_natural, velocity_normal FROM last_grounded_point"
+        df_R_flux= pd.read_sql(quevery, conn)
+        df_R_flux.to_csv(cfg["csv_all"])
         print("=" * 60)
         print("STEP 2 — Theoretical fluxes")
         print("=" * 60)
         compute_theoretical_fluxes(cfg)
-
-    if step in (0, 3):
-        print("=" * 60)
-        print("STEP 3 — Visualisation")
-        print("=" * 60)
-        plot_all_basins(cfg)
 
 
 main()
