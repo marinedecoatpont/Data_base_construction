@@ -136,22 +136,51 @@ def build_last_grounded_point(cursor, conn) -> None:
     _add_extra_columns(cursor, "last_grounded_point")
     conn.commit()
 
-    cursor.execute(f"""
-    INSERT INTO last_grounded_point ({FLUX_DATA_COLUMNS}, residence)
-    SELECT {FLUX_DATA_COLUMNS}, residence
+    insert_query = """
+    INSERT INTO last_grounded_point
+    SELECT        
+        f.x,
+        f.y,
+        f.simulation,
+        f.experiment,
+        f.time,
+        f.flux,
+        f.thickness,
+        f.velocity,
+        f.drag,
+        f.viscosity,
+        f.surface,
+        f.base,
+        f.bed,
+        f.flotaison,
+        f.R_drag,   
+        f.driving_stress,   
+        f.slope_flux,      
+        f.slope_max,      
+        f.viscosity,   
+        f.buttressing, 
+        f.buttressing_natural, 
+        f.velocity_normal,
+        f.residence
     FROM flux_data f
     JOIN (
-        SELECT simulation, experiment, x, y, MAX(time) AS max_time
+        SELECT
+            simulation,
+            experiment,
+            x,
+            y,
+            MAX(time) AS max_time
         FROM flux_data
         GROUP BY simulation, experiment, x, y
     ) m
-      ON  f.simulation = m.simulation
-      AND f.experiment = m.experiment
-      AND f.x = m.x
-      AND f.y = m.y
-      AND f.time = m.max_time;
-    """)
-    conn.commit()
+    ON  f.simulation = m.simulation
+    AND f.experiment = m.experiment
+    AND f.x = m.x
+    AND f.y = m.y
+    AND f.time = m.max_time;
+    """
+
+    cursor.execute(insert_query)
 
     _fill_counts(cursor, conn, "last_grounded_point")
     print("  last_grounded_point done.", flush=True)
