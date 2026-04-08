@@ -41,9 +41,9 @@ def _load_bedmachine_flux(bm_flux_path: str, reso: int) -> xr.DataArray:
     onto the simulation grid.
     Returns a DataArray with NaN everywhere the flux is zero.
     """
-    ds          = xr.open_dataset(bm_flux_path)
-    flux_bed    = ds.ligroundf
-    flux_bed    = xr.where(flux_bed != 0, flux_bed, np.nan)
+    ds = xr.open_dataset(bm_flux_path)
+    flux_bed = ds.ligroundf
+    flux_bed = xr.where(flux_bed != 0, flux_bed, np.nan)
     flux_interp = _grid(flux_bed, reso)
     ds.close()
     return flux_interp
@@ -108,7 +108,7 @@ def build_bedmachine_database(reso: int,
     result (with an added flux_bed column) to db_out.
     """
     print(f"Loading BedMachine flux from {bm_flux_path} …", flush=True)
-    flux_bed       = _load_bedmachine_flux(bm_flux_path, reso)
+    flux_bed = _load_bedmachine_flux(bm_flux_path, reso)
     xf, yf, flux_f = _extract_gl_points(flux_bed)
     print(f"  {len(xf)} non-zero BedMachine GL pixels found.", flush=True)
 
@@ -142,9 +142,7 @@ def build_bedmachine_database(reso: int,
 # =============================================================================
 
 if __name__ == "__main__":
-    bm_flux_path = os.path.join(
-        config.SAVE_PATH, "ligroundf_bedmachine_all_test.nc"
-    )
+    bm_flux_path = os.path.join(config.SAVE_PATH, "ligroundf_bedmachine_all_test.nc")
 
     for reso in config.RESOLUTIONS:
         db_src = config.get_db_path(reso)
