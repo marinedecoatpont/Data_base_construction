@@ -43,7 +43,7 @@ def get_db_path(reso: int) -> str:
 # RESOLUTIONS TO PROCESS
 # =============================================================================
 
-RESOLUTIONS = [16]
+RESOLUTIONS = 16
 
 # =============================================================================
 # SIMULATIONS  —  name : number_of_experiments

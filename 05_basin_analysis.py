@@ -273,16 +273,16 @@ def main():
         extract_basins_to_csv(cfg)
 
     if step in (0, 2):
-        reso = 16
-        db_path = config.get_db_path(reso)
+        
+        print("=" * 60)
+        print("STEP 2 — Theoretical fluxes")
+        print("=" * 60)
+        db_path = config.get_db_path(config.RESOLUTIONS)
         conn = sqlite3.connect(db_path)
 
         quevery = f"SELECT simulation,experiment, time, x, y, thickness, velocity, viscosity, drag, flux, velocity_base, buttressing, buttressing_natural, velocity_normal FROM last_grounded_point"
         df_R_flux= pd.read_sql(quevery, conn)
         df_R_flux.to_csv(cfg["csv_all"])
-        print("=" * 60)
-        print("STEP 2 — Theoretical fluxes")
-        print("=" * 60)
         compute_theoretical_fluxes(cfg)
 
 
