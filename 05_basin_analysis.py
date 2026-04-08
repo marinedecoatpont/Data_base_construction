@@ -24,7 +24,7 @@ Usage
 
 Optional overrides
   --db     path to SQLite database
-  --nc     path to basin NetCDF
+  --nc     path to basin NetCDF+
   --outdir path for output CSVs
 """
 

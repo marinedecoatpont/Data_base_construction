@@ -61,102 +61,45 @@ def get_resolution(data):
     return reso.values.item()
 
 
-def _compute_viscosity(vx: xr.DataArray, vy: xr.DataArray,thick: xr.DataArray, dx: float) -> xr.DataArray:
+def _compute_viscosity_buttressing(vx, vy,thick, x, y, k):
     """
     Effective viscosity from the strain-rate tensor and deviatoric stress.
     mu = (strain_rate / deviatoric_stress^n)^(-1/n)
     """
-    exx = np.gradient(vx.values, dx, axis=1)
-    eyy = np.gradient(vy.values, dx, axis=0)
-    dvx_dy = np.gradient(vx.values, dx, axis=0)
-    dvy_dx = np.gradient(vy.values, dx, axis=1)
-    exy = 0.5 * (dvx_dy + dvy_dx)
-
-    strain_rate = np.sqrt(0.5 * (exx**2 + eyy**2 + 2 * exy**2))
-    deviatoric  = 0.25 * config.RHO_ICE * config.GRAVITY_EFF * thick.values
-
-    mask_valid = (strain_rate > 0) & (deviatoric > 0) & np.isfinite(strain_rate) & np.isfinite(deviatoric)
-    mu = np.where(mask_valid,
-                  (strain_rate / deviatoric**config.GLEN_N) ** config.EXPOS,
-                  np.nan)
-    return xr.DataArray(mu, coords=vx.coords, dims=vx.dims)
-
-
-def _compute_buttressing(vx: xr.DataArray, vy: xr.DataArray,thick: np.ndarray, mu: np.ndarray,coords: np.ndarray) -> tuple[list, list, list]:
-    """
-    Computes the buttressing factor for each grounding-line point.
-
-    Returns
-    -------
-    nx_list, ny_list : unit outward normal vectors along the GL
-    b_list           : buttressing values clipped to [0, 1]
-    b_natural_list   : raw (unclipped) buttressing values
-    vn_list          : velocity normal to the GL (m yr-1)
-    """
-    nx_list, ny_list = [], []
-
-    for i in range(len(coords)):
-        if i == 0:
-            dx_c = coords[i+1, 0] - coords[i, 0]
-            dy_c = coords[i+1, 1] - coords[i, 1]
-        elif i == len(coords) - 1:
-            dx_c = coords[i, 0] - coords[i-1, 0]
-            dy_c = coords[i, 1] - coords[i-1, 1]
-        else:
-            dx_c = coords[i+1, 0] - coords[i-1, 0]
-            dy_c = coords[i+1, 1] - coords[i-1, 1]
-
-        # outward normal (perpendicular to tangent)
-        norm = np.sqrt(dx_c**2 + dy_c**2)
-        nx_list.append(-dy_c / norm)
-        ny_list.append( dx_c / norm)
-
-    G = config.RHO_ICE * (1.0 - config.RHO_ICE / config.RHO_WATER) * config.GRAVITY
-
     dudx = vx.differentiate("x")
     dvdy = vy.differentiate("y")
     dudy = vx.differentiate("y")
     dvdx = vy.differentiate("x")
 
-    b_list, b_natural_list, vn_list = [], [], []
+    dudx = dudx.sel(x=x[k], y=y[k], method="nearest").values
+    dvdy = dvdy.sel(x=x[k], y=y[k], method="nearest").values
+    dudy = dudy.sel(x=x[k], y=y[k], method="nearest").values
+    dvdx = dvdx.sel(x=x[k], y=y[k], method="nearest").values
 
-    for idx, (x_pt, y_pt) in enumerate(coords):
-        nx = nx_list[idx]
-        ny = ny_list[idx]
-        h  = thick[idx]
-        m  = mu[idx]
+    # strain rate tensor
+    exx = dudx
+    eyy = dvdy
+    exy = 0.5 * (dudy + dvdx)
+    strain_rate = np.sqrt(0.5*(exx**2 + eyy**2) + exy**2)
+    deviatic_stress = 0.25*config.RHO_ICE*config.GRAVITY*thick
+    mu = (strain_rate / deviatic_stress**config.GLEN_N)**config.EXPOS
 
-        dudx_v = dudx.sel(x=x_pt, y=y_pt, method="nearest").values
-        dvdy_v = dvdy.sel(x=x_pt, y=y_pt, method="nearest").values
-        dudy_v = dudy.sel(x=x_pt, y=y_pt, method="nearest").values
-        dvdx_v = dvdx.sel(x=x_pt, y=y_pt, method="nearest").values
-        vx_v   = vx.sel(x=x_pt, y=y_pt,   method="nearest").values
-        vy_v   = vy.sel(x=x_pt, y=y_pt,   method="nearest").values
+    G = config.RHO_ICE * (1.0 - config.RHO_ICE / config.RHO_WATER) * config.GRAVITY
+    visco = 0.5 * mu * strain_rate**((1-config.GLEN_N)/config.GLEN_N)
 
-        exx = dudx_v
-        eyy = dvdy_v
-        exy = 0.5 * (dudy_v + dvdx_v)
-        strain_rate  = np.sqrt(0.5 * (exx**2 + eyy**2) + exy**2)
-        deviatoric   = 0.25 * config.RHO_ICE * config.GRAVITY_EFF * h
+    #buttresing
+    velocity  = np.sqrt(vx**2 + vy**2)
+    vel = velocity.where(velocity > 0)
+    nx = vx / vel
+    ny = vy / vel
+    nx = nx.sel(x=x[k], y=y[k], method="nearest").values
+    ny = ny.sel(x=x[k], y=y[k], method="nearest").values
+    N = 2 * visco * ((2*dudx + dvdy)*nx**2 + (dudy+dvdx)*nx*ny + (2*dvdy + dudx)*ny**2)
+    b_n = N/(G*thick*0.5)
+    b= max(0, min(1,b_n))
+    vn = (vx.sel(x=x[k], y=y[k], method="nearest").values * nx + vy.sel(x=x[k], y=y[k], method="nearest").values * ny) * config.YEAR_S
+    return mu, b_n, b, vn
 
-        if strain_rate > 0 and deviatoric > 0:
-            mu_local = (strain_rate / deviatoric**config.GLEN_N) ** config.EXPOS
-        else:
-            mu_local = float("nan")
-
-        visco = 0.5 * mu_local * strain_rate ** ((1 - config.GLEN_N) / config.GLEN_N) if not np.isnan(mu_local) else float("nan")
-
-        N   = 2 * visco * ((2*exx + eyy)*nx**2 + (dudy_v + dvdx_v)*nx*ny + (2*eyy + exx)*ny**2)
-        b_n = N / (G * h * 0.5) if (h > 0 and not np.isnan(N)) else float("nan")
-        b   = float(np.clip(b_n, 0.0, 1.0)) if not np.isnan(b_n) else float("nan")
-
-        vn = (vx_v * nx + vy_v * ny) * config.YEAR_S
-
-        b_list.append(b)
-        b_natural_list.append(float(b_n) if not np.isnan(b_n) else float("nan"))
-        vn_list.append(float(vn))
-
-    return nx_list, ny_list, b_list, b_natural_list, vn_list
 
 
 # =============================================================================
@@ -255,9 +198,6 @@ def build_flux_database(reso: int, simulations: dict, db_path: str, test: bool =
                 velocity  = np.sqrt(vx_m**2 + vy_m**2)
                 flotaison = config.RHO_ICE * thick - config.RHO_WATER * (-base_m)
 
-                #viscosity 
-                mu = _compute_viscosity(vx_m, vy_m, thick, dx)
-
                 # surface slope & driving stress 
                 dsdx = surf_m.differentiate("x")
                 dsdy = surf_m.differentiate("y")
@@ -277,7 +217,6 @@ def build_flux_database(reso: int, simulations: dict, db_path: str, test: bool =
                 bed_g = _grid(bed_m,reso)
                 surf_g = _grid(surf_m,reso)
                 base_g = _grid(base_m,reso)
-                mu_g = _grid(mu,reso)
                 flot_g = _grid(flotaison,reso)
                 sf_g = _grid(slope_flux,reso)
                 sm_g = _grid(slope_max, reso)
@@ -285,6 +224,8 @@ def build_flux_database(reso: int, simulations: dict, db_path: str, test: bool =
                 R_g = _grid(R_drag,reso)
                 vx_g = _grid(vx_m, reso)
                 vy_g = _grid(vy_m,reso)
+                nx_g = _grid(nx_v, reso)
+                ny_g = _grid(ny_v, reso)
 
                 # extract GL pixels
                 flux_arr = flux_g.values
@@ -297,14 +238,11 @@ def build_flux_database(reso: int, simulations: dict, db_path: str, test: bool =
                 coords = np.column_stack([x_coords, y_coords])
 
                 thick_pts = thick_g.values[ii, jj]
-                mu_pts = mu_g.values[ii, jj]
-
-                # buttressing 
-                vx_g_t = vx_g
-                vy_g_t = vy_g
-                _, _, b_list, b_nat_list, vn_list = _compute_buttressing(vx_g_t, vy_g_t, thick_pts, mu_pts, coords)
 
                 for k in range(len(ii)):
+                    mu, b_n, b, vel_n = _compute_viscosity_buttressing(vx_m, vy_m, thick_g.values[ii[k], jj[k]], x_coords, y_coords, k)
+
+
                     records.append((
                         float(x_coords[k]),
                         float(y_coords[k]),
@@ -323,10 +261,10 @@ def build_flux_database(reso: int, simulations: dict, db_path: str, test: bool =
                         float(tau_g.values[ii[k], jj[k]]),
                         float(sf_g.values[ii[k], jj[k]]),
                         float(sm_g.values[ii[k], jj[k]]),
-                        float(mu_pts[k]),
-                        float(b_list[k]),
-                        float(b_nat_list[k]),
-                        float(vn_list[k]),
+                        float(mu),
+                        float(b),
+                        float(b_n),
+                        float(vel_n),
                     ))
 
                 cursor.executemany("""
@@ -336,7 +274,7 @@ def build_flux_database(reso: int, simulations: dict, db_path: str, test: bool =
                     surface, base, bed, flotaison,
                     R_drag, driving_stress, slope_flux, slope_max,
                     viscosity, buttressing, buttressing_natural, velocity_normal
-                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """, records)
                 conn.commit()
                 records = []
