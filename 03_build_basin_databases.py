@@ -35,9 +35,7 @@ def _load_basin_grid(nc_path: str) -> tuple:
     return basin_id, x_coords, y_coords
 
 
-def _basin_xy_sets(basin_id: np.ndarray,
-                   x_coords: np.ndarray,
-                   y_coords: np.ndarray) -> dict:
+def _basin_xy_sets(basin_id: np.ndarray,x_coords: np.ndarray,y_coords: np.ndarray) -> dict:
     """
     Returns a dict mapping basin index → set of (x, y) tuples
     belonging to that basin.
@@ -79,10 +77,7 @@ CREATE TABLE IF NOT EXISTS basin_data (
 """
 
 
-# =============================================================================
 # MAIN
-# =============================================================================
-
 def build_basin_databases(reso: int) -> None:
     db_path = config.get_db_path(reso)
     os.makedirs(config.BASIN_DB_DIR, exist_ok=True)
@@ -116,9 +111,8 @@ def build_basin_databases(reso: int) -> None:
         print(f"  Basin {basin_idx:02d}: {len(df_basin)} rows → {basin_db}", flush=True)
 
 
-if __name__ == "__main__":
-    for reso in config.RESOLUTIONS:
-        print(f"\n=== Resolution {reso} km ===", flush=True)
-        build_basin_databases(reso)
+for reso in config.RESOLUTIONS:
+    print(f"\n=== Resolution {reso} km ===", flush=True)
+    build_basin_databases(reso)
 
-    print("Done.", flush=True)
+print("Done.", flush=True)

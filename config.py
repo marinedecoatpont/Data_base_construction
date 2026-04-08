@@ -10,10 +10,10 @@ import os
 # =============================================================================
 
 # Root directory where NetCDF simulation files are stored
-PATH_IF = "/Users/lebescom/ISMIP6_AIS"
+PATH_IF = "/Users/lebescom"
 
 # Output directory for databases and results
-SAVE_PATH = "/Users/lebescom"
+SAVE_PATH = "/Users/lebescom/Documents/Code/Data_base_construction"
 
 # Reference grid files (one per resolution)
 GRID_FILES = {

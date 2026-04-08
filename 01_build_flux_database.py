@@ -12,16 +12,12 @@ The viscosity is derived from the local strain-rate tensor and the deviatoric-st
 """
 
 import sys
-import importlib
 import sqlite3
 import argparse
 import numpy as np
 import xarray as xr
 import config
 
-sys.path.append("/Users/lebescom/Documents/Code/Function")
-import ISMIP_function as ismip
-importlib.reload(ismip)
 
 
 # =============================================================================
@@ -29,11 +25,40 @@ importlib.reload(ismip)
 # =============================================================================
 
 def _open(simu: str, exp: str, var: str) -> xr.Dataset:
-    return ismip.open_file(simu, exp, var)
+    data = xr.open_dataset(f'{config.PATH_IF}/{simu}/{exp}/{var}_AIS_{simu}_{exp}.nc', decode_times = False)
+    return data
 
 
-def _grid(da: xr.DataArray, reso: int) -> xr.DataArray:
-    return ismip.grid(da, reso)
+def _grid(mask,reso):
+    if reso == 4:
+        ref_grid_data = xr.open_dataset(f'{config.SAVE_PATH}/grid4x4.nc')
+        ref_grid = ref_grid_data.grounding_mask
+
+        mask_interp = mask.interp(x = ref_grid.x, y = ref_grid.y)
+    elif reso == 16:
+        ref_grid_data = xr.open_dataset(f'{config.SAVE_PATH}/grid16x16.nc')
+        mask_interp = mask.interp(x = ref_grid_data.x, y = ref_grid_data.y)
+
+    return mask_interp
+
+def get_resolution(data):
+    """Give the resolution of a netCDF grid in meters
+
+    Parameters
+    ----------
+        data : dataset, (e.g ice flux at the grounding line)
+
+    Returns
+    -------
+    (float)
+        Grid resolution
+    """
+    x = data.x
+    x0 = x.isel(x = 0)
+    x1 = x.isel(x = 1)
+
+    reso = abs(x1 - x0)
+    return reso.values.item()
 
 
 def _compute_viscosity(vx: xr.DataArray, vy: xr.DataArray,thick: xr.DataArray, dx: float) -> xr.DataArray:
@@ -143,7 +168,7 @@ def build_flux_database(reso: int, simulations: dict, db_path: str, test: bool =
     Builds (or appends to) the flux_data table in the SQLite database at db_path.
     """
     ds_ref = xr.open_dataset(config.GRID_FILES[reso])
-    dx     = ismip.get_resolution(ds_ref)
+    dx     = get_resolution(ds_ref)
 
     conn   = sqlite3.connect(db_path)
     cursor = conn.cursor()
@@ -169,7 +194,8 @@ def build_flux_database(reso: int, simulations: dict, db_path: str, test: bool =
         slope_max        REAL,
         viscosity        REAL,
         buttressing      REAL,
-        buttressing_natural REAL
+        buttressing_natural REAL,
+        velocity_normal REAL
     );
     """)
     conn.commit()
@@ -229,10 +255,10 @@ def build_flux_database(reso: int, simulations: dict, db_path: str, test: bool =
                 velocity  = np.sqrt(vx_m**2 + vy_m**2)
                 flotaison = config.RHO_ICE * thick - config.RHO_WATER * (-base_m)
 
-                # --- viscosity ---
+                #viscosity 
                 mu = _compute_viscosity(vx_m, vy_m, thick, dx)
 
-                # --- surface slope & driving stress ---
+                # surface slope & driving stress 
                 dsdx = surf_m.differentiate("x")
                 dsdy = surf_m.differentiate("y")
                 vel = velocity.where(velocity > 0)
@@ -243,7 +269,7 @@ def build_flux_database(reso: int, simulations: dict, db_path: str, test: bool =
                 tau_d = config.RHO_ICE * config.GRAVITY * thick * slope_flux
                 R_drag = drag_m / tau_d.where(tau_d != 0)
 
-                # --- regrid ---
+                # regrid
                 flux_g = _grid(flux, reso)
                 vel_g = _grid(velocity,reso)
                 thick_g = _grid(thick, reso)
@@ -260,7 +286,7 @@ def build_flux_database(reso: int, simulations: dict, db_path: str, test: bool =
                 vx_g = _grid(vx_m, reso)
                 vy_g = _grid(vy_m,reso)
 
-                # --- extract GL pixels ---
+                # extract GL pixels
                 flux_arr = flux_g.values
                 ii, jj = np.where((flux_arr != 0) & ~np.isnan(flux_arr))
                 if len(ii) == 0:
@@ -273,10 +299,10 @@ def build_flux_database(reso: int, simulations: dict, db_path: str, test: bool =
                 thick_pts = thick_g.values[ii, jj]
                 mu_pts = mu_g.values[ii, jj]
 
-                # --- buttressing ---
+                # buttressing 
                 vx_g_t = vx_g
                 vy_g_t = vy_g
-                _, _, b_list, b_nat_list, _ = _compute_buttressing(vx_g_t, vy_g_t, thick_pts, mu_pts, coords)
+                _, _, b_list, b_nat_list, vn_list = _compute_buttressing(vx_g_t, vy_g_t, thick_pts, mu_pts, coords)
 
                 for k in range(len(ii)):
                     records.append((
@@ -300,6 +326,7 @@ def build_flux_database(reso: int, simulations: dict, db_path: str, test: bool =
                         float(mu_pts[k]),
                         float(b_list[k]),
                         float(b_nat_list[k]),
+                        float(vn_list[k]),
                     ))
 
                 cursor.executemany("""
@@ -308,7 +335,7 @@ def build_flux_database(reso: int, simulations: dict, db_path: str, test: bool =
                     flux, thickness, velocity, drag,
                     surface, base, bed, flotaison,
                     R_drag, driving_stress, slope_flux, slope_max,
-                    viscosity, buttressing, buttressing_natural
+                    viscosity, buttressing, buttressing_natural, velocity_normal
                 ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """, records)
                 conn.commit()
@@ -323,15 +350,11 @@ parser = argparse.ArgumentParser(description="Build the main flux_data SQLite ta
 parser.add_argument("--test", action="store_true", help="Run on a small subset.")
 args = parser.parse_args()
 
-simulations = (
-    {"IGE_ElmerIce": 6}
-    if args.test
-    else config.SIMULATIONS
-)
+simulations = ({"IGE_ElmerIce": 2} if args.test else config.SIMULATIONS)
 
 for reso in config.RESOLUTIONS:
     db_path = config.get_db_path(reso)
-    print(f"\n=== Resolution {reso} km | DB: {db_path} ===", flush=True)
+    print(f"\n=== Resolution {reso} km  DB: {db_path} ===", flush=True)
     build_flux_database(reso, simulations, db_path, test=args.test)
 
 print("Done.", flush=True)
