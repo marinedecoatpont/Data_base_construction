@@ -70,7 +70,6 @@ CREATE TABLE IF NOT EXISTS basin_data (
     viscosity            REAL,
     buttressing          REAL,
     buttressing_natural  REAL,
-    residence            INTEGER,
     n_simulations        INTEGER,
     n_timesteps          INTEGER
 );

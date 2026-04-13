@@ -36,14 +36,14 @@ BASIN_CSV_DIR = os.path.join(SAVE_PATH, "basins_csv")
 # =============================================================================
 
 def get_db_path(reso: int) -> str:
-    return os.path.join(SAVE_PATH, f"DataBase_{reso}km.db")
+    return os.path.join(SAVE_PATH, f"DataBase_{reso}km_test.db")
 
 
 # =============================================================================
 # RESOLUTIONS TO PROCESS
 # =============================================================================
 
-RESOLUTIONS = 16
+RESOLUTIONS = [16]
 
 # =============================================================================
 # SIMULATIONS  —  name : number_of_experiments
