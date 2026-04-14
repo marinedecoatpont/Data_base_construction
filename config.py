@@ -28,7 +28,7 @@ NC_BASINS = "Basins_Zwally_16km.nc"
 BEDMACHINE_FILE = "BedMachineAntarctica.nc"
 
 # Output directories
-BASIN_DB_DIR  = os.path.join(SAVE_PATH, "basin_databases")
+BASIN_DB_DIR  = os.path.join(SAVE_PATH, "basin_databases_flux_data")
 BASIN_CSV_DIR = os.path.join(SAVE_PATH, "basins_csv")
 
 # =============================================================================

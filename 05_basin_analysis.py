@@ -178,6 +178,7 @@ def _pivot_simulations(df_simu: pd.DataFrame, simulations: list) -> pd.DataFrame
 def _build_basin_lookup(basin_id, x_coords, y_coords) -> dict:
     basins    = {}
     basin_ids = np.unique(basin_id[~np.isnan(basin_id.astype(float))]).astype(int)
+    print(basin_ids)
     for i in basin_ids:
         rows, cols = np.where(basin_id == i)
         basins[i]  = pd.DataFrame({

@@ -183,7 +183,7 @@ def build_flux_database(reso: int, simulations: dict, db_path: str, test: bool =
                 surf = surf_ds.orog.isel(time=t)
                 base = base_ds.base.isel(time=t)
 
-                flux = np.abs(ligroundf * config.RHO_ICE) / 1e12
+                flux = np.abs(ligroundf * config.RHO_ICE) / 1e12#gt/yr
 
                 # --- masks ---
                 mask = (flux != 0) & np.isfinite(flux)

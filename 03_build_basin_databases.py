@@ -87,7 +87,7 @@ def build_basin_databases(reso: int) -> None:
 
     print("Loading last_grounded_point …", flush=True)
     conn_src = sqlite3.connect(db_path)
-    df = pd.read_sql("SELECT * FROM last_grounded_point", conn_src)
+    df = pd.read_sql("SELECT * FROM flux_data", conn_src)
     conn_src.close()
 
     for basin_idx, xy_set in sorted(basin_xy.items()):
