@@ -114,7 +114,8 @@ def build_bedmachine_database(reso: int,
 # =============================================================================
 
 if __name__ == "__main__":
-    bm_flux_path = os.path.join(config.SAVE_PATH, "ligroundf_bedmachine_all_test.nc")
+    #bm_flux_path = os.path.join(config.SAVE_PATH, "ligroundf_bedmachine_all_test.nc")
+    bm_flux_path = '/Users/lebescom/Documents/Code/Bassin_analysis/bedmachine_ligroundf.nc'
 
     for reso in config.RESOLUTIONS:
         db_src = config.get_db_path(reso)
